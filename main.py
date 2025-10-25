@@ -344,8 +344,8 @@ def computer_move():
 # 添加时钟控制帧率
 clock = pygame.time.Clock()
 
-client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-client.connect((HOST, PORT))
+# client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+# client.connect((HOST, PORT))
 
 # 主游戏循环
 running = True
