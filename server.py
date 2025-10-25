@@ -27,7 +27,9 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
         while True:  # TCP协议，数据可能分片到达
             chunk = await asyncio.to_thread(conn.recv, 4096)
             if not chunk:
+                print("No chunk")
                 break
+            print("Received chunk:", chunk)
             buffer += chunk
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)  # line是第一个换行符前的内容，剩余内容依旧被buffer缓存
@@ -44,6 +46,7 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
 
 
 async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
+    print(f"From {addr}: {line}")
     if len(line) < 4:
         await send_line(conn, "NULL消息格式错误")
         return
@@ -67,12 +70,13 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             return
         lst.append((conn, addr))  # 列表重载=的时候是引用的方式
         addr2room[addr] = room
+        print(f"地址 {addr} 加入房间 {room}")
         if len(lst) == 2:
             # 两人齐，开始
             for c, _a in lst:
                 await send_line(c, "STAR另一位玩家已连接，游戏开始！")
         else:
-            await send_line(conn, "NULL等待另一位玩家加入房间...")
+            await send_line(conn, "WAIT等待另一位玩家加入房间...")  # client自己分配为玩家1
 
     elif typ == "MOVE":
         room = addr2room.get(addr)
@@ -86,6 +90,12 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
 
     elif typ == "EXIT":
         await leave_room(conn, addr)
+
+    elif typ == "CANC":
+        # 客户端主动取消等待/退出房间
+        # 可选校验 body 的房间号，这里直接按连接维度退出
+        await leave_room(conn, addr)
+        await send_line(conn, "EXIT已取消匹配")
 
     else:
         await send_line(conn, "NULL未知指令")

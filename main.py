@@ -3,6 +3,8 @@ import sys
 import numpy as np
 import os
 import time
+import threading
+from collections import deque
 import socket
 from macro import *
 from button import Button
@@ -48,6 +50,22 @@ back_button = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
 undo_button = Button(WIDTH - 245, 5, 100, 40, "Undo", BLUE, (100, 100, 255))
 restart_button = Button(WIDTH // 2 - 100, HEIGHT // 2 + 60, 200, 50, "Restart", WHITE, GRAY, BLACK)
 exit_button = Button(WIDTH - 120, 5, 100, 40, "EXIT", RED, (255, 100, 100))
+send_button = Button(WIDTH // 2 + 50, HEIGHT // 2 + 50, 100, 40, "Send", GREEN, (100, 200, 100))
+# room_input = TextInput(WIDTH // 2 - 150, HEIGHT // 2, 200, 40, BLACK, WHITE)
+
+# ==== Room Number Input state ====
+room_input_text = ""
+room_input_active = False  # 点击输入框后变为 True
+room_input_rect = pygame.Rect(WIDTH // 2 - 150, HEIGHT // 2 - 10, 300, 50)
+room_hint_color = (50, 50, 50)
+room_border_color_idle = (120, 120, 120)
+room_border_color_active = (0, 120, 215)
+
+recv_queue = deque()        # 后台读线程把完整一行消息放进来
+room_waiting = False        # 是否处于等待另一位玩家
+current_room_num = None     # 当前加入/等待的房间号
+
+
 
 # 难度选择按钮
 easy_button = Button(WIDTH // 2 - 150, HEIGHT // 2 - 60, 300, 60, "Easy", GREEN, (100, 200, 100))
@@ -62,6 +80,33 @@ font_small = init_font(24)
 font_medium = init_font(36)
 font_large = init_font(72)
 font_title = init_font(96)
+
+def draw_room_number_input():
+    screen.fill(BROWN)
+
+    title_text = font_large.render("Enter Room Number", True, BLACK)
+    screen.blit(title_text, title_text.get_rect(center=(WIDTH // 2, HEIGHT // 4)))
+
+    if not room_waiting:
+        border_color = room_border_color_active if room_input_active else room_border_color_idle
+        pygame.draw.rect(screen, WHITE, room_input_rect)
+        pygame.draw.rect(screen, border_color, room_input_rect, 2)
+
+        if room_input_text:
+            text_surf = font_medium.render(room_input_text, True, BLACK)
+        else:
+            text_surf = font_medium.render("Type digits and press Enter", True, room_hint_color)
+        text_rect = text_surf.get_rect(midleft=(room_input_rect.x + 10, room_input_rect.centery))
+        screen.blit(text_surf, text_rect)
+
+        send_button.draw(screen, font_medium)
+        back_button.draw(screen, font_small)
+    else:
+        wait_text = font_large.render("Waiting...", True, BLACK)
+        screen.blit(wait_text, wait_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 10)))
+        # 仅提供退出按钮
+        back_button.draw(screen, font_small)
+
 
 # 绘制标题画面
 def draw_title_screen():
@@ -344,8 +389,30 @@ def computer_move():
 # 添加时钟控制帧率
 clock = pygame.time.Clock()
 
-# client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-# client.connect((HOST, PORT))
+def reader(conn: socket.socket):  # 读取服务器消息，逐行放入队列
+    try:
+        buf = b""
+        while True:
+            chunk = conn.recv(4096)
+            if not chunk:
+                recv_queue.append("CONN_CLOSED")
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                msg = line.decode("utf-8", "ignore").strip()
+                recv_queue.append(msg)
+    except Exception as e:
+        recv_queue.append(f"ERR{e}")
+    finally:
+        try: conn.close()
+        except: pass
+
+
+client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+client.connect((HOST, PORT))
+t = threading.Thread(target=reader, args=(client,), daemon=True)
+t.start()
 
 # 主游戏循环
 running = True
@@ -383,13 +450,54 @@ while running:
             elif game_state == MODE_SELECT:
                 if pvp_button.check_hover(mouse_pos):
                     game_mode = PVP_MODE
-                    game_state = GAME_PLAYING
+                    # game_state = GAME_PLAYING
+                    game_state = ROOM_NUMBER_INPUT
                     reset_game()
                 elif pvc_button.check_hover(mouse_pos):
                     game_mode = PVC_MODE
                     game_state = DIFFICULTY_SELECT
                 elif back_button.check_hover(mouse_pos):
                     game_state = TITLE_SCREEN
+
+            elif game_state == ROOM_NUMBER_INPUT:
+                if not room_waiting:
+                    # 点击输入框激活
+                    if room_input_rect.collidepoint(mouse_pos):
+                        room_input_active = True
+                    else:
+                        room_input_active = False
+
+                    # 点击 Send
+                    if send_button.check_hover(mouse_pos):
+                        try:
+                            rn = int(room_input_text.strip())
+                        except Exception:
+                            room_input_text = ""
+                        else:
+                            client.sendall(f"JOIN{rn}\n".encode("utf-8"))
+                            current_room_num = rn
+                            room_waiting = True
+                            room_input_active = False
+
+                    # 返回模式选择
+                    elif back_button.check_hover(mouse_pos):
+                        room_input_text = ""
+                        room_input_active = False
+                        game_state = MODE_SELECT
+                else:
+                    # 等待界面：只有退出
+                    if back_button.check_hover(mouse_pos):
+                        if current_room_num is not None:
+                            try:
+                                client.sendall(f"CANC{current_room_num}\n".encode("utf-8"))
+                            except Exception:
+                                pass
+                        # 重置
+                        room_waiting = False
+                        current_room_num = None
+                        room_input_text = ""
+                        game_state = MODE_SELECT
+
 
             # 难度选择界面
             elif game_state == DIFFICULTY_SELECT:
@@ -425,6 +533,7 @@ while running:
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
+                    # TODO 发送给服务器；发送不使能
 
                     if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
                         if board[row][col] == 0:
@@ -441,8 +550,59 @@ while running:
                             if game_mode == PVC_MODE and not game_over and current_player == 2:
                                 COMPUTER_MOVE = True
                                 continue
+        if event.type == pygame.KEYDOWN:
+            if game_state == ROOM_NUMBER_INPUT and room_input_active:
+                if event.key == pygame.K_RETURN:
+                    client.sendall(f"JOIN{rn}\n".encode("utf-8"))
+                    current_room_num = rn
+                    room_waiting = True
+                    room_input_active = False
 
+                elif event.key == pygame.K_BACKSPACE:
+                    room_input_text = room_input_text[:-1]
+                else:
+                    # 只接受可见字符，随后由 int 校验
+                    ch = event.unicode
+                    if ch and 32 <= ord(ch) <= 126:
+                        room_input_text += ch
+
+    # 处理后台读线程入队的服务器消息
+    while recv_queue:
+        msg = recv_queue.popleft()
+        tpe = msg[:4]
+
+        if tpe == "WAIT":
+            # 保持在房间输入界面但进入等待态
+            room_waiting = True
+            game_state = ROOM_NUMBER_INPUT
+
+        elif tpe == "STAR":
+            # 配对完成，开始游戏
+            room_waiting = False
+            reset_game()
+            game_state = GAME_PLAYING
+
+        elif tpe == "NULL":
+            # 非法或失败。清空输入，回到可输入态
+            room_waiting = False
+            current_room_num = None
+            room_input_text = ""
+
+        elif tpe == "EXIT":
+            # 对手退出；无论在等或在玩，回到模式选择
+            room_waiting = False
+            current_room_num = None
+            game_state = MODE_SELECT
+
+        elif msg == "CONN_CLOSED" or msg.startswith("ERR"):
+            # 连接断开或错误，退回标题
+            room_waiting = False
+            current_room_num = None
+            game_state = TITLE_SCREEN
+
+    
     # 更新按钮悬停状态
+    # 前段代码如果没有事件触发的话，就不会check_hover
     if game_state == TITLE_SCREEN:
         start_button.check_hover(mouse_pos)
         title_exit_button.check_hover(mouse_pos)
@@ -461,6 +621,11 @@ while running:
         exit_button.check_hover(mouse_pos)
         if game_over:
             restart_button.check_hover(mouse_pos)
+    elif game_state == ROOM_NUMBER_INPUT:
+        if not room_waiting:
+            send_button.check_hover(mouse_pos)
+        back_button.check_hover(mouse_pos)
+
 
     # 绘制当前界面
     if game_state == TITLE_SCREEN:
@@ -475,6 +640,8 @@ while running:
         draw_game_info()
         if game_over:
             display_winner(winner)
+    elif game_state == ROOM_NUMBER_INPUT:
+        draw_room_number_input()
 
     pygame.display.flip()
     clock.tick(10)
