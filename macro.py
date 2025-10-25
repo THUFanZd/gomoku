@@ -16,6 +16,7 @@ TITLE_SCREEN = 0
 MODE_SELECT = 1
 DIFFICULTY_SELECT = 2
 GAME_PLAYING = 3
+ROOM_NUMBER_INPUT = 4  # 输入及响应等待
 
 # 对战模式
 PVP_MODE = 0  # 人人对战
@@ -53,4 +54,3 @@ AI_SEARCH_DEPTH = 3
 AI_LIMITED_MOVE_NUM = 20
 
 # 网络参数
-request_type_list = ["JOIN"]
