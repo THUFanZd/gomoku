@@ -51,3 +51,6 @@ SCORE_STWO = 2
 # AI搜索参数
 AI_SEARCH_DEPTH = 3
 AI_LIMITED_MOVE_NUM = 20
+
+# 网络参数
+request_type_list = ["JOIN"]
