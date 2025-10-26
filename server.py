@@ -108,7 +108,7 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     lst = rooms.get(room, [])
     # 过滤掉自己
     new_lst = [(c, a) for (c, a) in lst if a != addr]
-    rooms[room] = new_lst
+    rooms[room] = new_lst  # 删掉自己
     # 通知对手
     for c, _a in new_lst:
         await send_line(c, "EXIT对手已退出游戏")  # TODO 回退上一界面

@@ -12,7 +12,7 @@ from backend import *
 from frontend import *
 from aiagent import AIagent
 
-HOST = '10.81.56.145'  # 这里填服务器电脑的局域网IP
+HOST = '192.168.1.115'  # 这里填服务器电脑的局域网IP
 PORT = 5000
 
 # 初始化pygame
@@ -34,7 +34,7 @@ ai_difficulty = MEDIUM  # 默认难度
 board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
 
 # 当前玩家 (1: 黑棋, 2: 白棋)
-current_player = 1
+current_player = 2
 game_over = False
 winner = 0
 
@@ -64,6 +64,8 @@ room_border_color_active = (0, 120, 215)
 recv_queue = deque()        # 后台读线程把完整一行消息放进来
 room_waiting = False        # 是否处于等待另一位玩家
 current_room_num = None     # 当前加入/等待的房间号
+
+wait_opponent = False      # 是否等待对手落子
 
 
 
@@ -277,7 +279,7 @@ def undo_move():
     board[last_row][last_col] = 0
 
     # 切换回上一个玩家
-    current_player = 3 - current_player
+    # current_player = 3 - current_player
 
     # 重置游戏结束状态
     game_over = False
@@ -336,7 +338,7 @@ def reset_game():
     """重置游戏"""
     global board, current_player, game_over, winner, move_history
     board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
-    current_player = 1
+    # current_player = 1
     game_over = False
     winner = 0
     move_history = []
@@ -450,7 +452,6 @@ while running:
             elif game_state == MODE_SELECT:
                 if pvp_button.check_hover(mouse_pos):
                     game_mode = PVP_MODE
-                    # game_state = GAME_PLAYING
                     game_state = ROOM_NUMBER_INPUT
                     reset_game()
                 elif pvc_button.check_hover(mouse_pos):
@@ -526,14 +527,19 @@ while running:
                     game_state = TITLE_SCREEN
                 elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
                     undo_move()
+                    # TODO 发送服务器，调整current_player
                 elif restart_button.check_hover(mouse_pos) and game_over:
+
                     reset_game()
                 elif not game_over:
+                    if wait_opponent:  # 正在等待对手落子，忽略点击
+                        continue
                     # 棋盘点击逻辑
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
-                    # TODO 发送给服务器；发送不使能
+                    client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
+                    wait_opponent = True
 
                     if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
                         if board[row][col] == 0:
@@ -544,12 +550,13 @@ while running:
                                 game_over = True
                                 winner = current_player
 
-                            current_player = 3 - current_player
+                            # current_player = 3 - current_player
 
                             # 人机对战模式：电脑回合
                             if game_mode == PVC_MODE and not game_over and current_player == 2:
                                 COMPUTER_MOVE = True
                                 continue
+
         if event.type == pygame.KEYDOWN:
             if game_state == ROOM_NUMBER_INPUT and room_input_active:
                 if event.key == pygame.K_RETURN:
@@ -575,12 +582,36 @@ while running:
             # 保持在房间输入界面但进入等待态
             room_waiting = True
             game_state = ROOM_NUMBER_INPUT
+            current_player = 1  # 自己是玩家1，先手
+            # print("玩家号：1")
 
         elif tpe == "STAR":
             # 配对完成，开始游戏
             room_waiting = False
             reset_game()
             game_state = GAME_PLAYING
+
+
+        elif tpe == "MOVE":
+            # 对手落子
+            body = msg[4:]
+            try:
+                row_str, col_str = body.split(",")
+                row = int(row_str)
+                col = int(col_str)
+            except Exception:
+                continue
+            else:  # if not except
+                if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
+                    opponent_clolor = 3 - current_player
+                    board[row][col] = opponent_clolor
+                    move_history.append((row, col))
+
+                    if check_win(row, col, opponent_clolor):
+                        game_over = True
+                        winner = opponent_clolor
+
+                    wait_opponent = False  # 对手已落子，结束等待状态
 
         elif tpe == "NULL":
             # 非法或失败。清空输入，回到可输入态
