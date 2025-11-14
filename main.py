@@ -30,6 +30,11 @@ game_state = TITLE_SCREEN
 game_mode = PVP_MODE
 ai_difficulty = MEDIUM  # 默认难度
 
+# 人机模式下：玩家与电脑的棋子颜色（1: 黑, 2: 白）
+human_color = 1
+ai_color = 2
+
+
 # 初始化棋盘
 board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
 
@@ -75,6 +80,10 @@ medium_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 20, 300, 60, "Medium", BL
 hard_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 100, 300, 60, "Hard", RED, (255, 100, 100))
 difficulty_back_button = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
 
+# 执棋颜色选择按钮（仅人机模式）
+choose_black_button = Button(WIDTH // 2 - 150, HEIGHT // 2 - 20, 300, 60, "Play as Black", BLUE, (100, 100, 255))
+choose_white_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 60, 300, 60, "Play as White", GREEN, (100, 200, 100))
+side_back_button   = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
 
 
 # 初始化不同大小的字体
@@ -187,6 +196,25 @@ def draw_difficulty_select():
     desc_rect3 = desc_text3.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 240))
     screen.blit(desc_text3, desc_rect3)
 
+def draw_side_select():
+    """绘制执棋颜色选择界面（仅人机模式）"""
+    screen.fill(BROWN)
+
+    # 标题
+    title_text = font_large.render("Choose Side", True, BLACK)
+    title_rect = title_text.get_rect(center=(WIDTH // 2, HEIGHT // 4))
+    screen.blit(title_text, title_rect)
+
+    # 按钮
+    choose_black_button.draw(screen, font_medium)
+    choose_white_button.draw(screen, font_medium)
+    side_back_button.draw(screen, font_small)
+
+    # 提示
+    tip_text = font_small.render("Black moves first", True, BLACK)
+    tip_rect = tip_text.get_rect(center=(WIDTH // 2, HEIGHT // 2 + 150))
+    screen.blit(tip_text, tip_rect)
+
 # 统计棋子数量
 def count_pieces(player_num: int):
     count = np.sum(board == player_num)
@@ -261,6 +289,8 @@ def draw_game_info():
         difficulty_names = ["Easy", "Medium", "Hard"]
         difficulty_text = font_small.render(f"Difficulty: {difficulty_names[ai_difficulty]}", True, BLACK)
         screen.blit(difficulty_text, (300, 40))
+        side_text = font_small.render(f"You: {'Black' if human_color == 1 else 'White'}", True, BLACK)
+        screen.blit(side_text, (300, 60))
 
     # 绘制按钮
     if move_history and not game_over:
@@ -339,10 +369,12 @@ def display_winner(winner):
 
 def reset_game():
     """重置游戏"""
-    global board, current_player, game_over, winner, move_history
+    global board, current_player, game_over, winner, move_history, ai_color, COMPUTER_MOVE
     board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
     if game_mode == PVC_MODE:
         current_player = 1
+        if ai_color == 1:
+            COMPUTER_MOVE = True
     game_over = False
     winner = 0
     move_history = []
@@ -367,14 +399,14 @@ def computer_move():
     电脑AI落子函数
     使用Minimax算法+Alpha-Beta剪枝
     """
-    global board, current_player
+    global board, current_player, ai_color
     
     # 确保是电脑的回合
-    if current_player != 2:
+    if current_player != ai_color:
         return None
         
     # 获取最佳移动
-    best_move = ai_agent.findBestChess(board, 2)
+    best_move = ai_agent.findBestChess(board, ai_color)
     
     if best_move:
         x, y = best_move
@@ -436,14 +468,15 @@ while running:
         computer_pos = computer_move()
         if computer_pos:
             row, col = computer_pos
-            board[row][col] = 2
+            board[row][col] = ai_color
             move_history.append((row, col))
 
-            if check_win(row, col, 2):
+            if check_win(row, col, ai_color):
                 game_over = True
-                winner = 2
+                winner = ai_color
 
-            current_player = 1
+            # 轮到另一方
+            current_player = 3 - ai_color
 
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
@@ -509,26 +542,43 @@ while running:
                         room_input_text = ""
                         game_state = MODE_SELECT
 
-
             # 难度选择界面
             elif game_state == DIFFICULTY_SELECT:
                 if easy_button.check_hover(mouse_pos):
                     ai_difficulty = EASY
                     ai_agent.set_difficulty(EASY)
-                    game_state = GAME_PLAYING
-                    reset_game()
+                    # 难度选好后，进入执棋颜色选择
+                    game_state = SIDE_SELECT
                 elif medium_button.check_hover(mouse_pos):
                     ai_difficulty = MEDIUM
                     ai_agent.set_difficulty(MEDIUM)
-                    game_state = GAME_PLAYING
-                    reset_game()
+                    game_state = SIDE_SELECT
                 elif hard_button.check_hover(mouse_pos):
                     ai_difficulty = HARD
                     ai_agent.set_difficulty(HARD)
-                    game_state = GAME_PLAYING
-                    reset_game()
+                    game_state = SIDE_SELECT
                 elif difficulty_back_button.check_hover(mouse_pos):
                     game_state = MODE_SELECT
+
+            elif game_state == SIDE_SELECT:
+                if choose_black_button.check_hover(mouse_pos):
+                    # 玩家执黑，电脑执白
+                    human_color = 1
+                    ai_color = 2
+                    ai_agent = AIagent(chess_len=LINE_COUNT, player_color=ai_color, difficulty=ai_difficulty)
+                    game_state = GAME_PLAYING
+                    reset_game()
+                elif choose_white_button.check_hover(mouse_pos):
+                    # 玩家执白，电脑执黑
+                    human_color = 2
+                    ai_color = 1
+                    ai_agent = AIagent(chess_len=LINE_COUNT, player_color=ai_color, difficulty=ai_difficulty)
+                    game_state = GAME_PLAYING
+                    reset_game()
+                elif side_back_button.check_hover(mouse_pos):
+                    # 返回难度选择
+                    game_state = DIFFICULTY_SELECT
+
 
             # 游戏进行中
             elif game_state == GAME_PLAYING:
@@ -570,12 +620,13 @@ while running:
                                 winner = current_player
 
                             if game_mode == PVC_MODE:
+                                # 玩家下完，轮到另一方
                                 current_player = 3 - current_player
 
-                            # 人机对战模式：电脑回合
-                            if game_mode == PVC_MODE and not game_over and current_player == 2:
-                                COMPUTER_MOVE = True
-                                continue
+                                # 如果轮到电脑的颜色，则触发电脑回合
+                                if not game_over and current_player == ai_color:
+                                    COMPUTER_MOVE = True
+                                    continue
 
         if event.type == pygame.KEYDOWN:
             if game_state == ROOM_NUMBER_INPUT and room_input_active:
@@ -656,7 +707,7 @@ while running:
 
     
     # 更新按钮悬停状态
-    # 前段代码如果没有事件触发的话，就不会check_hover
+    # 前段代码如果没有事件触发的话，就不会check_hover，导致前端无渲染效果
     if game_state == TITLE_SCREEN:
         start_button.check_hover(mouse_pos)
         title_exit_button.check_hover(mouse_pos)
@@ -679,6 +730,10 @@ while running:
         if not room_waiting:
             send_button.check_hover(mouse_pos)
         back_button.check_hover(mouse_pos)
+    elif game_state == SIDE_SELECT:
+        choose_black_button.check_hover(mouse_pos)
+        choose_white_button.check_hover(mouse_pos)
+        side_back_button.check_hover(mouse_pos)
 
 
     # 绘制当前界面
@@ -688,6 +743,8 @@ while running:
         draw_mode_select()
     elif game_state == DIFFICULTY_SELECT:
         draw_difficulty_select()
+    elif game_state == SIDE_SELECT:
+        draw_side_select()
     elif game_state == GAME_PLAYING:
         draw_board()
         draw_pieces()

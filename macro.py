@@ -17,6 +17,7 @@ MODE_SELECT = 1
 DIFFICULTY_SELECT = 2
 GAME_PLAYING = 3
 ROOM_NUMBER_INPUT = 4  # 输入及响应等待
+SIDE_SELECT = 5  # 人机对战中选择执棋颜色
 
 # 对战模式
 PVP_MODE = 0  # 人人对战
