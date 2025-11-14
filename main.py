@@ -12,7 +12,7 @@ from backend import *
 from frontend import *
 from aiagent import AIagent
 
-HOST = '192.168.1.115'  # 这里填服务器电脑的局域网IP
+HOST = '192.168.196.97'  # 这里填服务器电脑的局域网IP
 PORT = 5000
 
 # 初始化pygame
@@ -65,7 +65,7 @@ recv_queue = deque()        # 后台读线程把完整一行消息放进来
 room_waiting = False        # 是否处于等待另一位玩家
 current_room_num = None     # 当前加入/等待的房间号
 
-wait_opponent = False      # 是否等待对手落子
+wait_opponent = True      # 是否等待对手落子
 
 
 
@@ -188,10 +188,12 @@ def draw_difficulty_select():
     screen.blit(desc_text3, desc_rect3)
 
 # 统计棋子数量
-def count_pieces():
-    black_count = np.sum(board == 1)
-    white_count = np.sum(board == 2)
-    return black_count, white_count
+def count_pieces(player_num: int):
+    count = np.sum(board == player_num)
+    return count
+    # black_count = np.sum(board == 1)
+    # white_count = np.sum(board == 2)
+    # return black_count, white_count
 
 def draw_board():
     """绘制棋盘"""
@@ -246,7 +248,8 @@ def draw_game_info():
     screen.blit(player_text, (10, 10))
 
     # 显示棋子数量
-    black_count, white_count = count_pieces()
+    black_count = count_pieces(1)
+    white_count = count_pieces(2)
     count_text = font_small.render(f"Black: {black_count}  White: {white_count}", True, BLACK)
     screen.blit(count_text, (10, 30))
 
@@ -338,10 +341,16 @@ def reset_game():
     """重置游戏"""
     global board, current_player, game_over, winner, move_history
     board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
-    # current_player = 1
+    if game_mode == PVC_MODE:
+        current_player = 1
     game_over = False
     winner = 0
     move_history = []
+    global wait_opponent
+    if current_player == 1:
+        wait_opponent = False
+    elif current_player == 2:
+        wait_opponent = True
     # 重置AI状态
     if 'ai_agent' in globals():
         ai_agent.reset()
@@ -456,6 +465,7 @@ while running:
                     reset_game()
                 elif pvc_button.check_hover(mouse_pos):
                     game_mode = PVC_MODE
+                    current_player = 1  # 默认先手
                     game_state = DIFFICULTY_SELECT
                 elif back_button.check_hover(mouse_pos):
                     game_state = TITLE_SCREEN
@@ -525,20 +535,29 @@ while running:
                 # 检查按钮点击
                 if exit_button.check_hover(mouse_pos):
                     game_state = TITLE_SCREEN
-                elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
-                    undo_move()
-                    # TODO 发送服务器，调整current_player
-                elif restart_button.check_hover(mouse_pos) and game_over:
-
+                    if game_mode == PVP_MODE:
+                        client.sendall(f"CANC{current_room_num}\n".encode("utf-8"))
                     reset_game()
+                elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
+                    if count_pieces(current_player) > 0:
+                        undo_move()
+                    # TODO 发送服务器，调整wait state
+                elif game_over and restart_button.check_hover(mouse_pos):
+                    if game_mode == PVP_MODE:
+                        client.sendall(f"REST{current_room_num}\n".encode("utf-8"))
+                    reset_game()
+                    room_waiting = True
+                    game_state = ROOM_NUMBER_INPUT if game_mode == PVP_MODE else DIFFICULTY_SELECT
+                    current_player = 2  # 默认后手
                 elif not game_over:
-                    if wait_opponent:  # 正在等待对手落子，忽略点击
+                    if wait_opponent and game_mode == PVP_MODE:  # 正在等待对手落子，忽略点击
                         continue
                     # 棋盘点击逻辑
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
-                    client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
+                    if game_mode == PVP_MODE:
+                        client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
                     wait_opponent = True
 
                     if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
@@ -550,7 +569,8 @@ while running:
                                 game_over = True
                                 winner = current_player
 
-                            # current_player = 3 - current_player
+                            if game_mode == PVC_MODE:
+                                current_player = 3 - current_player
 
                             # 人机对战模式：电脑回合
                             if game_mode == PVC_MODE and not game_over and current_player == 2:
@@ -560,7 +580,8 @@ while running:
         if event.type == pygame.KEYDOWN:
             if game_state == ROOM_NUMBER_INPUT and room_input_active:
                 if event.key == pygame.K_RETURN:
-                    client.sendall(f"JOIN{rn}\n".encode("utf-8"))
+                    if game_mode == PVP_MODE:
+                        client.sendall(f"JOIN{rn}\n".encode("utf-8"))
                     current_room_num = rn
                     room_waiting = True
                     room_input_active = False
@@ -583,7 +604,7 @@ while running:
             room_waiting = True
             game_state = ROOM_NUMBER_INPUT
             current_player = 1  # 自己是玩家1，先手
-            # print("玩家号：1")
+            wait_opponent = False
 
         elif tpe == "STAR":
             # 配对完成，开始游戏
@@ -601,15 +622,16 @@ while running:
                 col = int(col_str)
             except Exception:
                 continue
-            else:  # if not except
+            else:
                 if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
-                    opponent_clolor = 3 - current_player
-                    board[row][col] = opponent_clolor
+                    opponent_color = 3 - current_player
+                    board[row][col] = opponent_color
                     move_history.append((row, col))
 
-                    if check_win(row, col, opponent_clolor):
+                    if check_win(row, col, opponent_color):
                         game_over = True
-                        winner = opponent_clolor
+                        winner = opponent_color
+                        # client.sendall(f"ENDD\n".encode("utf-8"))
 
                     wait_opponent = False  # 对手已落子，结束等待状态
 
@@ -620,10 +642,11 @@ while running:
             room_input_text = ""
 
         elif tpe == "EXIT":
-            # 对手退出；无论在等或在玩，回到模式选择
-            room_waiting = False
-            current_room_num = None
-            game_state = MODE_SELECT
+            # 对手退出；无论在等或在玩，回到等待状态
+            reset_game()
+            room_waiting = True
+            # current_room_num = None
+            game_state = ROOM_NUMBER_INPUT
 
         elif msg == "CONN_CLOSED" or msg.startswith("ERR"):
             # 连接断开或错误，退回标题

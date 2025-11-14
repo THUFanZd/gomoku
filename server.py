@@ -33,7 +33,32 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
             buffer += chunk
             while b"\n" in buffer:
                 line, buffer = buffer.split(b"\n", 1)  # line是第一个换行符前的内容，剩余内容依旧被buffer缓存
-                await dispatch(conn, addr, line.decode("utf-8", "ignore"))
+                line = line.decode("utf-8", "ignore")
+                typ = line[:4]
+                if typ == 'REST':  # 不优雅，但是复用了
+                    print('processing REST:')
+                    room = addr2room.get(addr)
+                    print('1')
+                    if room is None or room not in rooms:
+                        print('2')
+                        await send_line(conn, "NULL你不在任何房间中")
+                        # return
+                    if len(rooms[room]) == 2:  # 收到重开请求，而房间中还有两人，说明收到的是第一个人发来的重开请求，释放资源
+                        print('3')
+                        # del操作似乎引发了问题，导致after行打印不出来，后面再说吧
+                        # 问题就是按下restart之后行为不合预期
+                        del rooms[room]
+                        for key, value in addr2room.items():
+                            if value == room:
+                                del addr2room[key]
+                                break
+                        line = 'JOIN' + line[4:]  # str不可变
+                    elif len(rooms[room]) == 1:  # 房间中有一个人，这里又收到重开请求，说明是第二个重开请求
+                        print('4')
+                        line = 'JOIN' + line[4:]
+                    print('after process, line: ', line)
+
+                await dispatch(conn, addr, line)
     except Exception:
         # 简化处理：忽略异常，走清理流程
         pass
@@ -53,7 +78,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     typ = line[:4]
     body = line[4:].strip()
 
-    if typ == "JOIN":  # TODO 房间号输入 等待界面
+    if typ == "JOIN":
         try:
             room = int(body)
         except ValueError:
@@ -83,7 +108,6 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         if room is None or room not in rooms:
             await send_line(conn, "NULL你不在任何房间中")
             return
-        # TODO 客户端实现：收到服务器响应前，无法继续落子
         for c, a in rooms[room]:  # 转发走子信息给对手
             if a != addr:
                 await send_line(c, "MOVE" + body)
@@ -94,11 +118,16 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     elif typ == "CANC":
         # 客户端主动取消等待/退出房间
         # 可选校验 body 的房间号，这里直接按连接维度退出
-        await leave_room(conn, addr)
-        await send_line(conn, "EXIT已取消匹配")
+        await leave_room(conn, addr)  # 这里会告知另一个玩家
 
     else:
         await send_line(conn, "NULL未知指令")
+
+    print('after dispatch')
+    print('rooms:')
+    print(rooms)
+    print('addr2room:')
+    print(addr2room)
 
 
 async def leave_room(conn: socket.socket, addr: tuple) -> None:
