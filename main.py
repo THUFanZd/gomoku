@@ -2,18 +2,16 @@ import pygame
 import sys
 import numpy as np
 import os
-import time
 import threading
 from collections import deque
 import socket
+
 from macro import *
 from button import Button
 from backend import *
 from frontend import *
 from aiagent import AIagent
 
-HOST = '192.168.196.97'  # 这里填服务器电脑的局域网IP
-PORT = 5000
 
 # 初始化pygame
 pygame.init()
@@ -38,7 +36,8 @@ ai_color = 2
 # 初始化棋盘
 board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
 
-# 当前玩家 (1: 黑棋, 2: 白棋)
+# PVC: 当前落子玩家 (1: 黑棋, 2: 白棋)
+# PVP: 当前玩家棋色
 current_player = 2
 game_over = False
 winner = 0
@@ -56,7 +55,9 @@ undo_button = Button(WIDTH - 245, 5, 100, 40, "Undo", BLUE, (100, 100, 255))
 restart_button = Button(WIDTH // 2 - 100, HEIGHT // 2 + 60, 200, 50, "Restart", WHITE, GRAY, BLACK)
 exit_button = Button(WIDTH - 120, 5, 100, 40, "EXIT", RED, (255, 100, 100))
 send_button = Button(WIDTH // 2 + 50, HEIGHT // 2 + 50, 100, 40, "Send", GREEN, (100, 200, 100))
-# room_input = TextInput(WIDTH // 2 - 150, HEIGHT // 2, 200, 40, BLACK, WHITE)
+# 人人对战：对手悔棋请求确认对话框按钮
+undo_accept_button = Button(WIDTH // 2 - 140, HEIGHT // 2 + 30, 120, 40, "Yes", GREEN, (100, 200, 100))
+undo_reject_button = Button(WIDTH // 2 + 20,  HEIGHT // 2 + 30, 120, 40, "No",  RED,   (255, 100, 100))
 
 # ==== Room Number Input state ====
 room_input_text = ""
@@ -72,7 +73,10 @@ current_room_num = None     # 当前加入/等待的房间号
 
 wait_opponent = True      # 是否等待对手落子
 
-
+# 人人对战悔棋协议相关状态
+undo_request_pending = False      # 已向对手发出悔棋请求，等待对方回应
+undo_rejected = False             # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
+undo_dialog_visible = False       # 收到对手的悔棋请求，弹出确认对话框期间为 True
 
 # 难度选择按钮
 easy_button = Button(WIDTH // 2 - 150, HEIGHT // 2 - 60, 300, 60, "Easy", GREEN, (100, 200, 100))
@@ -292,10 +296,35 @@ def draw_game_info():
         side_text = font_small.render(f"You: {'Black' if human_color == 1 else 'White'}", True, BLACK)
         screen.blit(side_text, (300, 60))
 
+    if game_mode == PVP_MODE and undo_request_pending:
+        status_text = font_small.render("Waiting for opponent to accept undo...", True, BLACK)
+        screen.blit(status_text, (300, 40))
+
     # 绘制按钮
     if move_history and not game_over:
         undo_button.draw(screen, font_small)
     exit_button.draw(screen, font_small)
+
+def draw_undo_dialog():
+    """绘制对手悔棋请求的确认对话框（人人对战）"""
+    # 半透明遮罩
+    s = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    s.fill((0, 0, 0, 150))
+    screen.blit(s, (0, 0))
+
+    # 对话框主体
+    box_w, box_h = 420, 180
+    box_rect = pygame.Rect((WIDTH - box_w) // 2, (HEIGHT - box_h) // 2, box_w, box_h)
+    pygame.draw.rect(screen, (240, 240, 240), box_rect)
+    pygame.draw.rect(screen, BLACK, box_rect, 2)
+
+    text1 = font_medium.render("Opponent requests undo", True, BLACK)
+    text2 = font_small.render("Allow undo of their last move?", True, BLACK)
+    screen.blit(text1, text1.get_rect(center=(WIDTH // 2, box_rect.top + 55)))
+    screen.blit(text2, text2.get_rect(center=(WIDTH // 2, box_rect.top + 95)))
+
+    undo_accept_button.draw(screen, font_small)
+    undo_reject_button.draw(screen, font_small)
 
 # 悔棋功能
 def undo_move():
@@ -319,6 +348,43 @@ def undo_move():
     winner = 0
 
     return True
+
+def undo_pvc_move_pair():
+    """
+    人机模式悔棋：一次撤销“玩家上一手 + 电脑上一手”
+    要求：当前不是结束状态，且最后一步是电脑落子
+    """
+    global board, move_history, current_player, game_over, winner, COMPUTER_MOVE
+    global human_color, ai_color
+
+    if game_over:
+        return False
+    if len(move_history) < 2:
+        return False
+
+    # 检查最后一步是否为电脑颜色
+    last_row, last_col = move_history[-1]
+    if board[last_row][last_col] != ai_color:
+        # 不符合预期（例如刚开局还没有AI落子），不执行人机悔棋
+        return False
+
+    # 1) 撤销电脑上一手
+    row_ai, col_ai = move_history.pop()
+    board[row_ai][col_ai] = 0
+
+    # 2) 撤销玩家上一手
+    row_h, col_h = move_history.pop()
+    # 正常情况下这里就是玩家的棋；为稳妥起见，直接清空
+    board[row_h][col_h] = 0
+
+    # 撤销后轮到玩家落子
+    current_player = human_color
+    game_over = False
+    winner = 0
+    COMPUTER_MOVE = False
+
+    return True
+
 
 def check_win(row, col, player):
     """检查是否有玩家获胜"""
@@ -370,6 +436,7 @@ def display_winner(winner):
 def reset_game():
     """重置游戏"""
     global board, current_player, game_over, winner, move_history, ai_color, COMPUTER_MOVE
+    global wait_opponent, undo_request_pending, undo_rejected, undo_dialog_visible
     board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
     if game_mode == PVC_MODE:
         current_player = 1
@@ -377,12 +444,16 @@ def reset_game():
             COMPUTER_MOVE = True
     game_over = False
     winner = 0
+
+    # 重置人人对战悔棋相关状态
+    undo_request_pending = False
+    undo_rejected = False
+    undo_dialog_visible = False
+
     move_history = []
-    global wait_opponent
-    if current_player == 1:
-        wait_opponent = False
-    elif current_player == 2:
-        wait_opponent = True
+    # global wait_opponent
+    # if game_mode == PVP_MODE:
+    #     wait_opponent = True  # 人人对战默认等待对手先手
     # 重置AI状态
     if 'ai_agent' in globals():
         ai_agent.reset()
@@ -582,33 +653,67 @@ while running:
 
             # 游戏进行中
             elif game_state == GAME_PLAYING:
+                # 如果当前有对手悔棋确认对话框，优先处理它，其它点击忽略
+                if game_mode == PVP_MODE and undo_dialog_visible:
+                    if undo_accept_button.check_hover(mouse_pos):
+                        if not game_over and move_history:
+                            # 对手请求撤销的是他刚才的一步
+                            undo_move()
+                            # 撤销后轮到对手重新落子
+                            wait_opponent = True
+                        undo_dialog_visible = False
+                        if current_room_num is not None:
+                            client.sendall(f"AGRE{current_room_num}\n".encode("utf-8"))
+                    elif undo_reject_button.check_hover(mouse_pos):
+                        undo_dialog_visible = False
+                        if current_room_num is not None:
+                            client.sendall(f"DAGR{current_room_num}\n".encode("utf-8"))
+                    # 对话框弹出时，其余点击直接丢弃
+                    continue
                 # 检查按钮点击
                 if exit_button.check_hover(mouse_pos):
                     game_state = TITLE_SCREEN
                     if game_mode == PVP_MODE:
                         client.sendall(f"CANC{current_room_num}\n".encode("utf-8"))
                     reset_game()
-                elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
-                    if count_pieces(current_player) > 0:
-                        undo_move()
-                    # TODO 发送服务器，调整wait state
                 elif game_over and restart_button.check_hover(mouse_pos):
                     if game_mode == PVP_MODE:
                         client.sendall(f"REST{current_room_num}\n".encode("utf-8"))
+                        room_waiting = True
                     reset_game()
-                    room_waiting = True
                     game_state = ROOM_NUMBER_INPUT if game_mode == PVP_MODE else DIFFICULTY_SELECT
-                    current_player = 2  # 默认后手
+                    current_player = 2 if game_mode == PVP_MODE else 1  # PVP默认后手, PVC将黑棋设为先手
+                elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
+                    if game_mode == PVP_MODE:
+                        # 只能刚刚落子的一方发起悔棋：
+                        #   1) 当前处于等待对手落子（刚下完自己的棋）
+                        #   2) 本轮尚未发送悔棋请求，且未被拒绝
+                        if not wait_opponent:
+                            # 轮到自己走时不能悔棋
+                            pass
+                        elif undo_request_pending or undo_dialog_visible or undo_rejected:
+                            # 正在等待回应，或本轮已经被拒绝
+                            pass
+                        else:
+                            # 最后一步必须是自己下的
+                            last_row, last_col = move_history[-1]
+                            if board[last_row][last_col] == current_player:
+                                undo_request_pending = True
+                                if current_room_num is not None:
+                                    client.sendall(f"UNDO{current_room_num}\n".encode("utf-8"))
+                            # 否则不做任何事
+                    elif game_mode == PVC_MODE:
+                        undo_pvc_move_pair()
                 elif not game_over:
-                    if wait_opponent and game_mode == PVP_MODE:  # 正在等待对手落子，忽略点击
-                        continue
+                    if game_mode == PVP_MODE:  # 正在等待对手落子，忽略点击
+                        if wait_opponent or undo_request_pending or undo_dialog_visible: continue
                     # 棋盘点击逻辑
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
                     if game_mode == PVP_MODE:
                         client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
-                    wait_opponent = True
+                        wait_opponent = True
 
                     if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
                         if board[row][col] == 0:
@@ -685,12 +790,33 @@ while running:
                         # client.sendall(f"ENDD\n".encode("utf-8"))
 
                     wait_opponent = False  # 对手已落子，结束等待状态
+                    undo_rejected = False  # 新一轮开始，可以重新发起悔棋请求
 
         elif tpe == "NULL":
             # 非法或失败。清空输入，回到可输入态
             room_waiting = False
             current_room_num = None
             room_input_text = ""
+
+        elif tpe == "UNDO":
+            # 收到对手的悔棋请求：弹出确认对话框
+            if game_mode == PVP_MODE and not game_over:
+                undo_dialog_visible = True
+
+        elif tpe == "AGRE":
+            # 对手同意悔棋：撤销自己刚才的一步
+            if game_mode == PVP_MODE and undo_request_pending and not game_over and move_history:
+                undo_move()
+                undo_request_pending = False
+                undo_rejected = False
+                # 撤销后轮到自己重新落子
+                wait_opponent = False
+
+        elif tpe == "DAGR":
+            # 对手拒绝悔棋：在对方落子前不能再次发起
+            if game_mode == PVP_MODE and undo_request_pending:
+                undo_request_pending = False
+                undo_rejected = True
 
         elif tpe == "EXIT":
             # 对手退出；无论在等或在玩，回到等待状态
@@ -726,6 +852,9 @@ while running:
         exit_button.check_hover(mouse_pos)
         if game_over:
             restart_button.check_hover(mouse_pos)
+        if game_mode == PVP_MODE and undo_dialog_visible:
+            undo_accept_button.check_hover(mouse_pos)
+            undo_reject_button.check_hover(mouse_pos)
     elif game_state == ROOM_NUMBER_INPUT:
         if not room_waiting:
             send_button.check_hover(mouse_pos)
@@ -749,6 +878,8 @@ while running:
         draw_board()
         draw_pieces()
         draw_game_info()
+        if game_mode == PVP_MODE and undo_dialog_visible:
+            draw_undo_dialog()
         if game_over:
             display_winner(winner)
     elif game_state == ROOM_NUMBER_INPUT:

@@ -55,3 +55,5 @@ AI_SEARCH_DEPTH = 3
 AI_LIMITED_MOVE_NUM = 20
 
 # 网络参数
+HOST = '127.0.0.1'  # 这里填服务器电脑的局域网IP。本机运行可用127.0.0.1
+PORT = 5000

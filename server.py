@@ -1,8 +1,7 @@
 import socket
 import asyncio
 from typing import Dict, List, Tuple
-
-HOST, PORT = "0.0.0.0", 5000
+from macro import PORT
 
 # 房间与连接管理
 rooms: Dict[int, List[Tuple[socket.socket, tuple]]] = {}  # room_id -> [(conn, addr)]
@@ -96,11 +95,10 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         lst.append((conn, addr))  # 列表重载=的时候是引用的方式
         addr2room[addr] = room
         print(f"地址 {addr} 加入房间 {room}")
-        if len(lst) == 2:
-            # 两人齐，开始
+        if len(lst) == 2:  # 两人齐，开始
             for c, _a in lst:
                 await send_line(c, "STAR另一位玩家已连接，游戏开始！")
-        else:
+        elif len(lst) == 1:
             await send_line(conn, "WAIT等待另一位玩家加入房间...")  # client自己分配为玩家1
 
     elif typ == "MOVE":
@@ -120,8 +118,38 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         # 可选校验 body 的房间号，这里直接按连接维度退出
         await leave_room(conn, addr)  # 这里会告知另一个玩家
 
+    elif typ == "UNDO":
+        room = addr2room.get(addr)
+        if room is None or room not in rooms:
+            await send_line(conn, "NULL你不在任何房间中")
+            return
+        for c, a in rooms[room]:  # 转发悔棋请求给对手
+            if a != addr:
+                await send_line(c, "UNDO" + body)
+
+    elif typ == "AGRE":
+        # 对手同意悔棋
+        room = addr2room.get(addr)
+        if room is None or room not in rooms:
+            await send_line(conn, "NULL你不在任何房间中")
+            return
+        for c, a in rooms[room]:
+            if a != addr:
+                await send_line(c, "AGRE" + body)
+
+    elif typ == "DAGR":
+        # 对手拒绝悔棋
+        room = addr2room.get(addr)
+        if room is None or room not in rooms:
+            await send_line(conn, "NULL你不在任何房间中")
+            return
+        for c, a in rooms[room]:
+            if a != addr:
+                await send_line(c, "DAGR" + body)
+
     else:
         await send_line(conn, "NULL未知指令")
+
 
     print('after dispatch')
     print('rooms:')
@@ -149,9 +177,9 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
 async def main() -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind((HOST, PORT))
+    server.bind(("0.0.0.0", PORT))
     server.listen(128)
-    print(f"服务器启动于 {HOST}:{PORT}")
+    print(f"服务器启动于 {"0.0.0.0"}:{PORT}")
     try:
         await accept_loop(server)
     finally:
