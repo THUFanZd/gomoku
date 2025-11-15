@@ -1,3 +1,5 @@
+# 全局常量
+
 # 游戏常量
 WIDTH, HEIGHT = 800, 800
 LINE_COUNT = 15

@@ -7,14 +7,14 @@ from collections import deque
 import socket
 
 from macro import *
-from button import Button
+from button import *
 from backend import *
 from frontend import *
 from aiagent import AIagent
 
 
 # 初始化pygame
-pygame.init()
+# pygame.init()
 
 # 创建游戏窗口
 screen = pygame.display.set_mode((WIDTH, HEIGHT))
@@ -45,20 +45,6 @@ winner = 0
 # 悔棋功能相关变量
 move_history = []  # 记录每一步的落子位置
 
-# 创建按钮
-start_button = Button(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 60, "START", GREEN, (100, 200, 100))
-title_exit_button = Button(WIDTH//2 - 100, HEIGHT//2 + 130, 200, 60, "EXIT GAME", RED, (255, 100, 100))
-pvp_button = Button(WIDTH // 2 - 150, HEIGHT // 2, 300, 60, "Player vs Player", BLUE, (100, 100, 255))
-pvc_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 80, 300, 60, "Player vs Computer", GREEN, (100, 200, 100))
-back_button = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
-undo_button = Button(WIDTH - 245, 5, 100, 40, "Undo", BLUE, (100, 100, 255))
-restart_button = Button(WIDTH // 2 - 100, HEIGHT // 2 + 60, 200, 50, "Restart", WHITE, GRAY, BLACK)
-exit_button = Button(WIDTH - 120, 5, 100, 40, "EXIT", RED, (255, 100, 100))
-send_button = Button(WIDTH // 2 + 50, HEIGHT // 2 + 50, 100, 40, "Send", GREEN, (100, 200, 100))
-# 人人对战：对手悔棋请求确认对话框按钮
-undo_accept_button = Button(WIDTH // 2 - 140, HEIGHT // 2 + 30, 120, 40, "Yes", GREEN, (100, 200, 100))
-undo_reject_button = Button(WIDTH // 2 + 20,  HEIGHT // 2 + 30, 120, 40, "No",  RED,   (255, 100, 100))
-
 # ==== Room Number Input state ====
 room_input_text = ""
 room_input_active = False  # 点击输入框后变为 True
@@ -78,23 +64,6 @@ undo_request_pending = False      # 已向对手发出悔棋请求，等待对�
 undo_rejected = False             # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
 undo_dialog_visible = False       # 收到对手的悔棋请求，弹出确认对话框期间为 True
 
-# 难度选择按钮
-easy_button = Button(WIDTH // 2 - 150, HEIGHT // 2 - 60, 300, 60, "Easy", GREEN, (100, 200, 100))
-medium_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 20, 300, 60, "Medium", BLUE, (100, 100, 255))
-hard_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 100, 300, 60, "Hard", RED, (255, 100, 100))
-difficulty_back_button = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
-
-# 执棋颜色选择按钮（仅人机模式）
-choose_black_button = Button(WIDTH // 2 - 150, HEIGHT // 2 - 20, 300, 60, "Play as Black", BLUE, (100, 100, 255))
-choose_white_button = Button(WIDTH // 2 - 150, HEIGHT // 2 + 60, 300, 60, "Play as White", GREEN, (100, 200, 100))
-side_back_button   = Button(20, HEIGHT - 70, 100, 40, "Back", RED, (255, 100, 100))
-
-
-# 初始化不同大小的字体
-font_small = init_font(24)
-font_medium = init_font(36)
-font_large = init_font(72)
-font_title = init_font(96)
 
 def draw_room_number_input():
     screen.fill(BROWN)
