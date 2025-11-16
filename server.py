@@ -6,7 +6,8 @@ from macro import PORT
 # 房间与连接管理
 rooms: Dict[int, List[Tuple[socket.socket, tuple]]] = {}  # room_id -> [(conn, addr)]
 addr2room: Dict[tuple, int] = {}                          # addr -> room_id
-
+protected_rooms: set = set()                             # 保护中的房间号（重开过程中）
+restarting_rooms: Dict[int, set[tuple]] = {}
 
 async def send_line(conn: socket.socket, text: str) -> None:
     data = (text.rstrip("\n") + "\n").encode("utf-8", "ignore")  # 确保末尾仅一个换行，使换行成为EOF
@@ -38,20 +39,41 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                     print('processing REST:')
                     room = addr2room.get(addr)
                     print('1')
-                    if room is None or room not in rooms:
-                        print('2')
-                        await send_line(conn, "NULL你不在任何房间中")
-                        # return
-                    if len(rooms[room]) == 2:  # 收到重开请求，而房间中还有两人，说明收到的是第一个人发来的重开请求，释放资源
+                    if room is None:
+                        # 第一个用户删掉之后，在dispatch创建之前，第二个用户尝试addr2room.get会进入None分支
+                        # 所以不能单纯地扔掉，而是判断一下是否在重开房间号里
+                        # 尝试从 REST 消息体中解析房间号（假设 REST 后面跟的是房间号）
+                        body = line[4:].strip()
+                        try:
+                            guess_room = int(body)
+                        except ValueError:
+                            await send_line(conn, "NULL你不在任何房间中")
+                            continue
+
+                        # 如果这个房间正在重开，而且这个 addr 在重开名单里，就允许把 REST 当成 JOIN 来处理
+                        if guess_room in restarting_rooms and addr in restarting_rooms[guess_room]:
+                            line = 'JOIN' + line[4:]
+                        else:
+                            await send_line(conn, "NULL你不在任何房间中")
+                            continue
+
+                    if room not in rooms:  # 说明对手重开后又退出了
+                        print(100)
+                        line = 'JOIN' + line[4:]  # str不可变
+                    elif len(rooms[room]) == 2:
                         print('3')
-                        # del操作似乎引发了问题，导致after行打印不出来，后面再说吧
-                        # 问题就是按下restart之后行为不合预期
+                        # 删除房间里的列表
+                        addr1 = rooms[room][0][1]
+                        addr2 = rooms[room][1][1]
                         del rooms[room]
-                        for key, value in addr2room.items():
+                        # 删除 addr2room 中所有指向这个房间的条目
+                        for key, value in list(addr2room.items()):
                             if value == room:
                                 del addr2room[key]
-                                break
-                        line = 'JOIN' + line[4:]  # str不可变
+                        # 在重开过程中保护房间号
+                        protected_rooms.add(room)
+                        restarting_rooms[room] = {addr1, addr2}
+                        line = 'JOIN' + line[4:]
                     elif len(rooms[room]) == 1:  # 房间中有一个人，这里又收到重开请求，说明是第二个重开请求
                         print('4')
                         line = 'JOIN' + line[4:]
@@ -61,12 +83,14 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
     except Exception:
         # 简化处理：忽略异常，走清理流程
         pass
+        # raise ValueError("处理客户端时发生异常")
     finally:
         await leave_room(conn, addr)
         try:
             conn.close()
         except Exception:
             pass
+            raise ValueError("关闭连接时发生异常")
 
 
 async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
@@ -84,18 +108,28 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             await send_line(conn, "NULL房间号非法")
             return
         lst = rooms.setdefault(room, [])  # dict方法，返回的是value
-        # 去重：同一 addr 重复 JOIN 先移除 TODO 为什么要这样做？直接发给客户你已在房间不行吗？
+        # 去重：同一 addr 重复 JOIN 先移除 好处在于维护了FIFO
         for i, (c, a) in enumerate(list(lst)):
             if a == addr:
                 lst.pop(i)
                 break
-        if len(lst) >= 2:
+        # 1）如果房间在重开保护中：只允许 restarting_rooms 中记录的旧玩家加入
+        if room in protected_rooms:
+            allowed_addrs = restarting_rooms.get(room, set())
+            if addr not in allowed_addrs:
+                await send_line(conn, "NULL房间已满")
+                return
+
+        # 2）正常容量限制：非保护状态下，最多两人
+        elif len(lst) >= 2:
             await send_line(conn, "NULL房间已满")
             return
         lst.append((conn, addr))  # 列表重载=的时候是引用的方式
-        addr2room[addr] = room
+        addr2room[addr] = room  # 若已有则覆盖
         print(f"地址 {addr} 加入房间 {room}")
         if len(lst) == 2:  # 两人齐，开始
+            protected_rooms.discard(room)
+            restarting_rooms.pop(room, None)  # None: 不存在也不报错
             for c, _a in lst:
                 await send_line(c, "STAR另一位玩家已连接，游戏开始！")
         elif len(lst) == 1:
@@ -162,6 +196,8 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     room = addr2room.pop(addr, None)
     if room is None:
         return
+
+    protected_rooms.discard(room)
     lst = rooms.get(room, [])
     # 过滤掉自己
     new_lst = [(c, a) for (c, a) in lst if a != addr]
@@ -172,6 +208,7 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     # 房间空则删除
     if not new_lst:
         rooms.pop(room, None)
+        restarting_rooms.pop(room, None)
 
 
 async def main() -> None:

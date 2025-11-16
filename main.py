@@ -284,6 +284,8 @@ while running:
             # 模式选择界面
             elif game_state == MODE_SELECT:
                 if pvp_button.check_hover(mouse_pos):
+                    current_player = 2      # 默认认为自己是玩家2（白）
+                    wait_opponent = True    # 默认在等对手先手
                     game_mode = PVP_MODE
                     game_state = ROOM_NUMBER_INPUT
                     reset_game()
@@ -407,6 +409,8 @@ while running:
                     reset_game()
                     game_state = ROOM_NUMBER_INPUT if game_mode == PVP_MODE else DIFFICULTY_SELECT
                     current_player = 2 if game_mode == PVP_MODE else 1  # PVP默认后手, PVC将黑棋设为先手
+                    if game_mode == PVP_MODE:
+                        wait_opponent = True
                 elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
                     if game_mode == PVP_MODE:
                         # 只能刚刚落子的一方发起悔棋：
@@ -435,12 +439,13 @@ while running:
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
-                    if game_mode == PVP_MODE:
-                        client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
-                        wait_opponent = True
 
                     if 0 <= row < LINE_COUNT and 0 <= col < LINE_COUNT:
                         if board[row][col] == 0:
+                            if game_mode == PVP_MODE:
+                                client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
+                                wait_opponent = True
+                                
                             board[row][col] = current_player
                             move_history.append((row, col))
 
@@ -460,11 +465,22 @@ while running:
         if event.type == pygame.KEYDOWN:
             if game_state == ROOM_NUMBER_INPUT and room_input_active:
                 if event.key == pygame.K_RETURN:
-                    if game_mode == PVP_MODE:
-                        client.sendall(f"JOIN{rn}\n".encode("utf-8"))
-                    current_room_num = rn
-                    room_waiting = True
-                    room_input_active = False
+                    text = room_input_text.strip()
+                    if not text:
+                        # 空输入，直接忽略或清空
+                        room_input_text = ""
+                    else:
+                        try:
+                            rn = int(text)
+                        except Exception:
+                            # 非数字，清空重新输入
+                            room_input_text = ""
+                        else:
+                            if game_mode == PVP_MODE:
+                                client.sendall(f"JOIN{rn}\n".encode("utf-8"))
+                            current_room_num = rn
+                            room_waiting = True
+                            room_input_active = False
 
                 elif event.key == pygame.K_BACKSPACE:
                     room_input_text = room_input_text[:-1]
@@ -548,6 +564,8 @@ while running:
             room_waiting = True
             # current_room_num = None
             game_state = ROOM_NUMBER_INPUT
+            current_player = 1  # 自己是玩家1，先手
+            wait_opponent = False
 
         elif msg == "CONN_CLOSED" or msg.startswith("ERR"):
             # 连接断开或错误，退回标题
