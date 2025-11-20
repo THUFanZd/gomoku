@@ -270,8 +270,10 @@ def draw_undo_dialog(screen):
 def display_winner(screen, winner):
     if winner == 1:
         text = font_large.render("Black Wins!", True, RED)
-    else:
+    elif winner == 2:
         text = font_large.render("White Wins!", True, RED)
+    elif winner == 0:
+        text = font_large.render("Draw!", True, RED)
 
     text_rect = text.get_rect(center=(WIDTH // 2, HEIGHT // 2 - 30))
 

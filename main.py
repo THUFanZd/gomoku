@@ -8,7 +8,6 @@ import socket
 
 from macro import *
 from button import *
-from backend import *
 from frontend import *
 from aiagent import AIagent
 
@@ -32,6 +31,7 @@ ai_difficulty = MEDIUM  # 默认难度
 human_color = 1
 ai_color = 2
 
+ai_agent = AIagent(chess_len=LINE_COUNT, player_color=2, difficulty=ai_difficulty)
 
 # 初始化棋盘
 board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
@@ -64,6 +64,9 @@ undo_request_pending = False      # 已向对手发出悔棋请求，等待对�
 undo_rejected = False             # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
 undo_dialog_visible = False       # 收到对手的悔棋请求，弹出确认对话框期间为 True
 
+# ============================================================================
+# 函数
+# ============================================================================
 
 # 悔棋功能
 def undo_move():
@@ -153,6 +156,10 @@ def check_win(row, col, player):
 
     return False
 
+def check_full():
+    """检查棋盘是否已满"""
+    return np.all(board != 0)
+
 def reset_game():
     """重置游戏"""
     global board, current_player, game_over, winner, move_history, ai_color, COMPUTER_MOVE
@@ -178,12 +185,7 @@ def reset_game():
     if 'ai_agent' in globals():
         ai_agent.reset()
 
-# ============================================================================
-# 人机对战相关函数
-# ============================================================================
 
-# 创建AI实例
-ai_agent = AIagent(chess_len=LINE_COUNT, player_color=2, difficulty=ai_difficulty)
 
 def computer_move():
     """
@@ -216,12 +218,6 @@ def computer_move():
     else:
         return None
 
-# ============================================================================
-# 主程序
-# ============================================================================
-
-# 添加时钟控制帧率
-clock = pygame.time.Clock()
 
 def reader(conn: socket.socket):  # 读取服务器消息，逐行放入队列
     try:
@@ -242,6 +238,13 @@ def reader(conn: socket.socket):  # 读取服务器消息，逐行放入队列
         try: conn.close()
         except: pass
 
+
+# ============================================================================
+# 主程序
+# ============================================================================
+
+# 添加时钟控制帧率
+clock = pygame.time.Clock()
 
 client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 client.connect((HOST, PORT))
@@ -265,6 +268,10 @@ while running:
             if check_win(row, col, ai_color):
                 game_over = True
                 winner = ai_color
+
+            elif check_full():
+                game_over = True
+                winner = 0  # 平局
 
             # 轮到另一方
             current_player = 3 - ai_color
@@ -452,6 +459,10 @@ while running:
                             if check_win(row, col, current_player):
                                 game_over = True
                                 winner = current_player
+                            
+                            elif check_full():
+                                game_over = True
+                                winner = 0  # 平局
 
                             if game_mode == PVC_MODE:
                                 # 玩家下完，轮到另一方
@@ -527,7 +538,10 @@ while running:
                     if check_win(row, col, opponent_color):
                         game_over = True
                         winner = opponent_color
-                        # client.sendall(f"ENDD\n".encode("utf-8"))
+                        
+                    elif check_full():
+                        game_over = True
+                        winner = 0  # 平局
 
                     wait_opponent = False  # 对手已落子，结束等待状态
                     undo_rejected = False  # 新一轮开始，可以重新发起悔棋请求
