@@ -11,6 +11,9 @@ from button import *
 from frontend import *
 from aiagent import AIagent
 
+# ============================================================================
+# 后端全局变量
+# ============================================================================
 
 # 初始化pygame
 pygame.init()
@@ -40,7 +43,7 @@ board = np.zeros((LINE_COUNT, LINE_COUNT), dtype=int)
 # PVP: 当前玩家棋色
 current_player = 2
 game_over = False
-winner = 0
+winner = 0  # 0: 平局, 1: 黑胜, 2: 白胜
 
 # 悔棋功能相关变量
 move_history = []  # 记录每一步的落子位置
@@ -53,16 +56,16 @@ room_hint_color = (50, 50, 50)
 room_border_color_idle = (120, 120, 120)
 room_border_color_active = (0, 120, 215)
 
-recv_queue = deque()        # 后台读线程把完整一行消息放进来
-room_waiting = False        # 是否处于等待另一位玩家
-current_room_num = None     # 当前加入/等待的房间号
+recv_queue = deque()     # 后台读线程把完整一行消息放进来
+room_waiting = False     # 是否处于等待另一位玩家
+current_room_num = None  # 当前加入/等待的房间号
 
-wait_opponent = True      # 是否等待对手落子
+wait_opponent = True     # 是否等待对手落子(线上用)
 
 # 人人对战悔棋协议相关状态
-undo_request_pending = False      # 已向对手发出悔棋请求，等待对方回应
-undo_rejected = False             # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
-undo_dialog_visible = False       # 收到对手的悔棋请求，弹出确认对话框期间为 True
+undo_request_pending = False  # 已向对手发出悔棋请求，等待对方回应
+undo_rejected = False         # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
+undo_dialog_visible = False   # 收到对手的悔棋请求，弹出确认对话框期间为 True
 
 # ============================================================================
 # 函数
@@ -75,20 +78,13 @@ def undo_move():
 
     if not move_history or game_over:
         return False
-
     # 获取最后一步的位置
     last_row, last_col = move_history.pop()
-
     # 清空该位置的棋子
     board[last_row][last_col] = 0
-
-    # 切换回上一个玩家
-    # current_player = 3 - current_player
-
     # 重置游戏结束状态
     game_over = False
     winner = 0
-
     return True
 
 def undo_pvc_move_pair():
@@ -103,28 +99,23 @@ def undo_pvc_move_pair():
         return False
     if len(move_history) < 2:
         return False
-
     # 检查最后一步是否为电脑颜色
     last_row, last_col = move_history[-1]
     if board[last_row][last_col] != ai_color:
         # 不符合预期（例如刚开局还没有AI落子），不执行人机悔棋
         return False
-
     # 1) 撤销电脑上一手
     row_ai, col_ai = move_history.pop()
     board[row_ai][col_ai] = 0
-
     # 2) 撤销玩家上一手
     row_h, col_h = move_history.pop()
     # 正常情况下这里就是玩家的棋；为稳妥起见，直接清空
     board[row_h][col_h] = 0
-
     # 撤销后轮到玩家落子
     current_player = human_color
     game_over = False
     winner = 0
     COMPUTER_MOVE = False
-
     return True
 
 
@@ -156,8 +147,7 @@ def check_win(row, col, player):
 
     return False
 
-def check_full():
-    """检查棋盘是否已满"""
+def check_full():  # 检查棋盘是否已满
     return np.all(board != 0)
 
 def reset_game():
@@ -178,9 +168,7 @@ def reset_game():
     undo_dialog_visible = False
 
     move_history = []
-    # global wait_opponent
-    # if game_mode == PVP_MODE:
-    #     wait_opponent = True  # 人人对战默认等待对手先手
+
     # 重置AI状态
     if 'ai_agent' in globals():
         ai_agent.reset()
@@ -237,7 +225,6 @@ def reader(conn: socket.socket):  # 读取服务器消息，逐行放入队列
     finally:
         try: conn.close()
         except: pass
-
 
 # ============================================================================
 # 主程序
@@ -381,7 +368,6 @@ while running:
                     # 返回难度选择
                     game_state = DIFFICULTY_SELECT
 
-
             # 游戏进行中
             elif game_state == GAME_PLAYING:
                 # 如果当前有对手悔棋确认对话框，优先处理它，其它点击忽略
@@ -399,9 +385,8 @@ while running:
                         undo_dialog_visible = False
                         if current_room_num is not None:
                             client.sendall(f"DAGR{current_room_num}\n".encode("utf-8"))
-                    # 对话框弹出时，其余点击直接丢弃
-                    continue
-                # 检查按钮点击
+                    continue  # 对话框弹出时，其余点击直接丢弃
+
                 if exit_button.check_hover(mouse_pos):
                     game_state = TITLE_SCREEN
                     if game_mode == PVP_MODE:
@@ -409,6 +394,7 @@ while running:
                         current_player = 2
                         wait_opponent = True
                     reset_game()
+                
                 elif game_over and restart_button.check_hover(mouse_pos):
                     if game_mode == PVP_MODE:
                         client.sendall(f"REST{current_room_num}\n".encode("utf-8"))
@@ -418,17 +404,16 @@ while running:
                     current_player = 2 if game_mode == PVP_MODE else 1  # PVP默认后手, PVC将黑棋设为先手
                     if game_mode == PVP_MODE:
                         wait_opponent = True
+                
                 elif undo_button.check_hover(mouse_pos) and move_history and not game_over:
                     if game_mode == PVP_MODE:
                         # 只能刚刚落子的一方发起悔棋：
                         #   1) 当前处于等待对手落子（刚下完自己的棋）
                         #   2) 本轮尚未发送悔棋请求，且未被拒绝
                         if not wait_opponent:
-                            # 轮到自己走时不能悔棋
-                            pass
+                            pass  # 轮到自己走时不能悔棋
                         elif undo_request_pending or undo_dialog_visible or undo_rejected:
-                            # 正在等待回应，或本轮已经被拒绝
-                            pass
+                            pass  # 正在等待回应，或本轮已经被拒绝
                         else:
                             # 最后一步必须是自己下的
                             last_row, last_col = move_history[-1]
@@ -439,10 +424,10 @@ while running:
                             # 否则不做任何事
                     elif game_mode == PVC_MODE:
                         undo_pvc_move_pair()
+                
                 elif not game_over:
-                    if game_mode == PVP_MODE:  # 正在等待对手落子，忽略点击
+                    if game_mode == PVP_MODE:  # 正在等待对手落子/处理悔棋，忽略点击
                         if wait_opponent or undo_request_pending or undo_dialog_visible: continue
-                    # 棋盘点击逻辑
                     x, y = mouse_pos
                     col = round((x - GRID_SIZE) / GRID_SIZE)
                     row = round((y - GRID_SIZE) / GRID_SIZE)
@@ -452,23 +437,16 @@ while running:
                             if game_mode == PVP_MODE:
                                 client.sendall(f"MOVE{row},{col}\n".encode("utf-8"))
                                 wait_opponent = True
-                                
                             board[row][col] = current_player
                             move_history.append((row, col))
-
                             if check_win(row, col, current_player):
                                 game_over = True
                                 winner = current_player
-                            
                             elif check_full():
                                 game_over = True
                                 winner = 0  # 平局
-
-                            if game_mode == PVC_MODE:
-                                # 玩家下完，轮到另一方
+                            if game_mode == PVC_MODE:  # 人机轮换
                                 current_player = 3 - current_player
-
-                                # 如果轮到电脑的颜色，则触发电脑回合
                                 if not game_over and current_player == ai_color:
                                     COMPUTER_MOVE = True
                                     continue
@@ -477,26 +455,22 @@ while running:
             if game_state == ROOM_NUMBER_INPUT and room_input_active:
                 if event.key == pygame.K_RETURN:
                     text = room_input_text.strip()
-                    if not text:
-                        # 空输入，直接忽略或清空
+                    if not text:  # 无法转化的输入处理为空
                         room_input_text = ""
                     else:
                         try:
                             rn = int(text)
                         except Exception:
-                            # 非数字，清空重新输入
                             room_input_text = ""
                         else:
-                            if game_mode == PVP_MODE:
+                            if game_mode == PVP_MODE:  # 保险
                                 client.sendall(f"JOIN{rn}\n".encode("utf-8"))
                             current_room_num = rn
                             room_waiting = True
                             room_input_active = False
-
                 elif event.key == pygame.K_BACKSPACE:
                     room_input_text = room_input_text[:-1]
-                else:
-                    # 只接受可见字符，随后由 int 校验
+                else:  # 只接受可见字符，随后由 int 校验
                     ch = event.unicode
                     if ch and 32 <= ord(ch) <= 126:
                         room_input_text += ch
@@ -519,7 +493,6 @@ while running:
             reset_game()
             game_state = GAME_PLAYING
 
-
         elif tpe == "MOVE":
             # 对手落子
             body = msg[4:]
@@ -534,15 +507,12 @@ while running:
                     opponent_color = 3 - current_player
                     board[row][col] = opponent_color
                     move_history.append((row, col))
-
                     if check_win(row, col, opponent_color):
                         game_over = True
                         winner = opponent_color
-                        
                     elif check_full():
                         game_over = True
                         winner = 0  # 平局
-
                     wait_opponent = False  # 对手已落子，结束等待状态
                     undo_rejected = False  # 新一轮开始，可以重新发起悔棋请求
 
@@ -587,7 +557,6 @@ while running:
             current_room_num = None
             game_state = TITLE_SCREEN
 
-    
     # 更新按钮悬停状态
     # 前段代码如果没有事件触发的话，就不会check_hover，导致前端无渲染效果
     if game_state == TITLE_SCREEN:
@@ -620,14 +589,11 @@ while running:
         choose_white_button.check_hover(mouse_pos)
         side_back_button.check_hover(mouse_pos)
 
-
     # 绘制当前界面
     if game_state == TITLE_SCREEN:
         draw_title_screen(screen)
-
     elif game_state == MODE_SELECT:
         draw_mode_select(screen)
-
     elif game_state == DIFFICULTY_SELECT:
         draw_difficulty_select(
             screen,
@@ -636,7 +602,6 @@ while running:
             hard_button,
             difficulty_back_button,
         )
-
     elif game_state == SIDE_SELECT:
         draw_side_select(
             screen,
@@ -644,7 +609,6 @@ while running:
             choose_white_button,
             side_back_button,
         )
-
     elif game_state == GAME_PLAYING:
         draw_board(screen)
         draw_pieces(screen, board)
@@ -665,7 +629,6 @@ while running:
             draw_undo_dialog(screen)
         if game_over:
             display_winner(screen, winner)
-
     elif game_state == ROOM_NUMBER_INPUT:
         draw_room_number_input(
             screen,

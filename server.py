@@ -6,8 +6,9 @@ from macro import PORT
 # 房间与连接管理
 rooms: Dict[int, List[Tuple[socket.socket, tuple]]] = {}  # room_id -> [(conn, addr)]
 addr2room: Dict[tuple, int] = {}                          # addr -> room_id
-protected_rooms: set = set()                             # 保护中的房间号（重开过程中）
+protected_rooms: set = set()                              # 保护中的房间号（重开过程中）
 restarting_rooms: Dict[int, set[tuple]] = {}
+
 
 async def send_line(conn: socket.socket, text: str) -> None:
     data = (text.rstrip("\n") + "\n").encode("utf-8", "ignore")  # 确保末尾仅一个换行，使换行成为EOF
@@ -35,10 +36,9 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                 line, buffer = buffer.split(b"\n", 1)  # line是第一个换行符前的内容，剩余内容依旧被buffer缓存
                 line = line.decode("utf-8", "ignore")
                 typ = line[:4]
+
                 if typ == 'REST':  # 不优雅，但是复用了
-                    print('processing REST:')
                     room = addr2room.get(addr)
-                    print('1')
                     if room is None:
                         # 第一个用户删掉之后，在dispatch创建之前，第二个用户尝试addr2room.get会进入None分支
                         # 所以不能单纯地扔掉，而是判断一下是否在重开房间号里
@@ -58,10 +58,8 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                             continue
 
                     if room not in rooms:  # 说明对手重开后又退出了
-                        print(100)
                         line = 'JOIN' + line[4:]  # str不可变
                     elif len(rooms[room]) == 2:
-                        print('3')
                         # 删除房间里的列表
                         addr1 = rooms[room][0][1]
                         addr2 = rooms[room][1][1]
@@ -74,23 +72,17 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                         protected_rooms.add(room)
                         restarting_rooms[room] = {addr1, addr2}
                         line = 'JOIN' + line[4:]
-                    elif len(rooms[room]) == 1:  # 房间中有一个人，这里又收到重开请求，说明是第二个重开请求
-                        print('4')
+                    elif len(rooms[room]) == 1:  # 房间中有一个人，又收到重开请求，说明是第二个重开请求
                         line = 'JOIN' + line[4:]
-                    print('after process, line: ', line)
-
                 await dispatch(conn, addr, line)
     except Exception:
-        # 简化处理：忽略异常，走清理流程
-        pass
-        # raise ValueError("处理客户端时发生异常")
+        pass  # 确保服务器运行
     finally:
         await leave_room(conn, addr)
         try:
             conn.close()
         except Exception:
             pass
-            raise ValueError("关闭连接时发生异常")
 
 
 async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
@@ -101,7 +93,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     typ = line[:4]
     body = line[4:].strip()
 
-    if typ == "JOIN":
+    if typ == "JOIN":  # 加入房间
         try:
             room = int(body)
         except ValueError:
@@ -119,23 +111,22 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             if addr not in allowed_addrs:
                 await send_line(conn, "NULL房间已满")
                 return
-
-        # 2）正常容量限制：非保护状态下，最多两人
+        # 2）容量限制：非保护状态下，最多两人
         elif len(lst) >= 2:
             await send_line(conn, "NULL房间已满")
             return
-        lst.append((conn, addr))  # 列表重载=的时候是引用的方式
+        lst.append((conn, addr))
         addr2room[addr] = room  # 若已有则覆盖
         print(f"地址 {addr} 加入房间 {room}")
         if len(lst) == 2:  # 两人齐，开始
             protected_rooms.discard(room)
             restarting_rooms.pop(room, None)  # None: 不存在也不报错
             for c, _a in lst:
-                await send_line(c, "STAR另一位玩家已连接，游戏开始！")
+                await send_line(c, "STAR另一位玩家已连接，游戏开始！")  # 客户端分配黑棋
         elif len(lst) == 1:
-            await send_line(conn, "WAIT等待另一位玩家加入房间...")  # client自己分配为玩家1
+            await send_line(conn, "WAIT等待另一位玩家加入房间...")
 
-    elif typ == "MOVE":
+    elif typ == "MOVE":  # 落子
         room = addr2room.get(addr)
         if room is None or room not in rooms:
             await send_line(conn, "NULL你不在任何房间中")
@@ -144,15 +135,13 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             if a != addr:
                 await send_line(c, "MOVE" + body)
 
-    elif typ == "EXIT":
+    elif typ == "EXIT":  # 退出
         await leave_room(conn, addr)
 
-    elif typ == "CANC":
-        # 客户端主动取消等待/退出房间
-        # 可选校验 body 的房间号，这里直接按连接维度退出
-        await leave_room(conn, addr)  # 这里会告知另一个玩家
+    elif typ == "CANC":  # 客户端主动取消等待/退出房间
+        await leave_room(conn, addr)  # 会告知另一个玩家
 
-    elif typ == "UNDO":
+    elif typ == "UNDO":  # 悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
             await send_line(conn, "NULL你不在任何房间中")
@@ -161,8 +150,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             if a != addr:
                 await send_line(c, "UNDO" + body)
 
-    elif typ == "AGRE":
-        # 对手同意悔棋
+    elif typ == "AGRE":  # 对手同意悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
             await send_line(conn, "NULL你不在任何房间中")
@@ -171,8 +159,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             if a != addr:
                 await send_line(c, "AGRE" + body)
 
-    elif typ == "DAGR":
-        # 对手拒绝悔棋
+    elif typ == "DAGR":  # 对手拒绝悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
             await send_line(conn, "NULL你不在任何房间中")
@@ -183,7 +170,6 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
 
     else:
         await send_line(conn, "NULL未知指令")
-
 
     print('after dispatch')
     print('rooms:')
@@ -196,7 +182,6 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     room = addr2room.pop(addr, None)
     if room is None:
         return
-
     protected_rooms.discard(room)
     lst = rooms.get(room, [])
     # 过滤掉自己
@@ -204,7 +189,7 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     rooms[room] = new_lst  # 删掉自己
     # 通知对手
     for c, _a in new_lst:
-        await send_line(c, "EXIT对手已退出游戏")  # TODO 回退上一界面
+        await send_line(c, "EXIT对手已退出游戏")
     # 房间空则删除
     if not new_lst:
         rooms.pop(room, None)

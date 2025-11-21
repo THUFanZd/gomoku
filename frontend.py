@@ -1,7 +1,7 @@
 import pygame
 import numpy as np
 from macro import *
-from button import *   # 使用按钮对象（start_button 等）
+from button import *
 
 pygame.font.init()  # 新增这一行，确保可以创建字体
 
@@ -280,7 +280,5 @@ def display_winner(screen, winner):
     s = pygame.Surface((WIDTH, 200), pygame.SRCALPHA)
     s.fill((0, 0, 0, 180))
     screen.blit(s, (0, HEIGHT // 2 - 80))
-
     screen.blit(text, text_rect)
-
     restart_button.draw(screen, font_medium)

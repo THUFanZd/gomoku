@@ -24,7 +24,7 @@ class Button:
         self.is_hovered = self.rect.collidepoint(pos)
         return self.is_hovered
     
-# 创建按钮
+# 基本按钮
 start_button = Button(WIDTH // 2 - 100, HEIGHT // 2 + 50, 200, 60, "START", GREEN, (100, 200, 100))
 title_exit_button = Button(WIDTH//2 - 100, HEIGHT//2 + 130, 200, 60, "EXIT GAME", RED, (255, 100, 100))
 pvp_button = Button(WIDTH // 2 - 150, HEIGHT // 2, 300, 60, "Player vs Player", BLUE, (100, 100, 255))
