@@ -518,6 +518,7 @@ while running:
 
         elif tpe == "NULL":
             # 非法或失败。清空输入，回到可输入态
+            # TODO 前端显示
             room_waiting = False
             current_room_num = None
             room_input_text = ""

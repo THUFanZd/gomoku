@@ -40,26 +40,24 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                 if typ == 'REST':  # 不优雅，但是复用了
                     room = addr2room.get(addr)
                     if room is None:
-                        # 第一个用户删掉之后，在dispatch创建之前，第二个用户尝试addr2room.get会进入None分支
+                        # 第一个用户重开删掉之后，在dispatch创建之前(并不指CANC了)
+                        # 第二个用户尝试addr2room.get会进入该分支
                         # 所以不能单纯地扔掉，而是判断一下是否在重开房间号里
-                        # 尝试从 REST 消息体中解析房间号（假设 REST 后面跟的是房间号）
                         body = line[4:].strip()
                         try:
                             guess_room = int(body)
                         except ValueError:
                             await send_line(conn, "NULL你不在任何房间中")
                             continue
-
                         # 如果这个房间正在重开，而且这个 addr 在重开名单里，就允许把 REST 当成 JOIN 来处理
                         if guess_room in restarting_rooms and addr in restarting_rooms[guess_room]:
                             line = 'JOIN' + line[4:]
                         else:
                             await send_line(conn, "NULL你不在任何房间中")
                             continue
-
-                    if room not in rooms:  # 说明对手重开后又退出了
+                    elif room not in rooms:  # 说明对手重开后又退出了
                         line = 'JOIN' + line[4:]  # str不可变
-                    elif len(rooms[room]) == 2:
+                    elif len(rooms[room]) == 2:  # 说明该请求是房间内的第一个重开请求
                         # 删除房间里的列表
                         addr1 = rooms[room][0][1]
                         addr2 = rooms[room][1][1]
@@ -184,12 +182,11 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
         return
     protected_rooms.discard(room)
     lst = rooms.get(room, [])
-    # 过滤掉自己
     new_lst = [(c, a) for (c, a) in lst if a != addr]
     rooms[room] = new_lst  # 删掉自己
     # 通知对手
     for c, _a in new_lst:
-        await send_line(c, "EXIT对手已退出游戏")
+        await send_line(c, "EXIT")
     # 房间空则删除
     if not new_lst:
         rooms.pop(room, None)
@@ -198,9 +195,9 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
 
 async def main() -> None:
     server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server.bind(("0.0.0.0", PORT))
-    server.listen(128)
+    server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)  # 避免进入TIME_WAIT
+    server.bind(("0.0.0.0", PORT))  # 监听本机所有网络接口
+    server.listen(128)  # 用户上限
     print(f"服务器启动于 {"0.0.0.0"}:{PORT}")
     try:
         await accept_loop(server)
