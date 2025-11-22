@@ -137,7 +137,28 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         await leave_room(conn, addr)
 
     elif typ == "CANC":  # 客户端主动取消等待/退出房间
-        await leave_room(conn, addr)  # 会告知另一个玩家
+        room = addr2room.get(addr)
+        if room is None:
+            # 针对重开过程中，第二个玩家没有重开而是CANC的情况
+            try:
+                guess_room = int(body)
+            except ValueError:
+                await send_line(conn, "NULLYou don't belong to any room...")
+                return
+            # 用EXIT通知以触发前端通知
+            if guess_room in restarting_rooms and addr in restarting_rooms[guess_room]:
+                lst = rooms.get(guess_room, [])
+                for c, a in lst:
+                    if a != addr:
+                        await send_line(c, "EXITOpponent left the room.")
+                protected_rooms.discard(guess_room)  # 解除保护
+                restarting_rooms.pop(guess_room, None)
+                return
+            else:
+                await send_line(conn, "NULLYou don't belong to any room...")
+                return
+        # 正常情况（已经在房间内）
+        await leave_room(conn, addr)
 
     elif typ == "UNDO":  # 悔棋
         room = addr2room.get(addr)
@@ -184,9 +205,8 @@ async def leave_room(conn: socket.socket, addr: tuple) -> None:
     lst = rooms.get(room, [])
     new_lst = [(c, a) for (c, a) in lst if a != addr]
     rooms[room] = new_lst  # 删掉自己
-    # 通知对手
-    for c, _a in new_lst:
-        await send_line(c, "EXIT")
+    for c, _a in new_lst:  # 通知对手
+        await send_line(c, "EXITOpponent left the room.")
     # 房间空则删除
     if not new_lst:
         rooms.pop(room, None)

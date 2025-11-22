@@ -558,6 +558,9 @@ while running:
 
         elif tpe == "EXIT":
             # 对手退出；无论在等或在玩，回到等待状态
+            body = msg[4:].strip()
+            if body:
+                show_hint_message(body)
             reset_game()
             room_waiting = True
             # current_room_num = None
