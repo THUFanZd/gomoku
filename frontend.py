@@ -282,3 +282,19 @@ def display_winner(screen, winner):
     screen.blit(s, (0, HEIGHT // 2 - 80))
     screen.blit(text, text_rect)
     restart_button.draw(screen, font_medium)
+
+# 消息提示
+def draw_hint_message(screen, text):
+    """在底部显示一条半透明提示，不影响其它操作"""
+    if not text:
+        return
+
+    bar_height = 40
+    # 半透明黑色背景条
+    s = pygame.Surface((WIDTH, bar_height), pygame.SRCALPHA)
+    s.fill((0, 0, 0, 160))
+    screen.blit(s, (0, HEIGHT - bar_height))
+
+    msg_surface = font_small.render(text, True, WHITE)
+    msg_rect = msg_surface.get_rect(center=(WIDTH // 2, HEIGHT - bar_height // 2))
+    screen.blit(msg_surface, msg_rect)

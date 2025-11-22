@@ -67,6 +67,10 @@ undo_request_pending = False  # 已向对手发出悔棋请求，等待对方回
 undo_rejected = False         # 上一次悔棋已被对方拒绝，在对方落子前不能再次请求
 undo_dialog_visible = False   # 收到对手的悔棋请求，弹出确认对话框期间为 True
 
+# 由服务器 NULL 消息驱动的临时提示
+hint_message = ""
+hint_message_expire = 0  # pygame.time.get_ticks() 的到期时间（毫秒）
+
 # ============================================================================
 # 函数
 # ============================================================================
@@ -225,6 +229,13 @@ def reader(conn: socket.socket):  # 读取服务器消息，逐行放入队列
     finally:
         try: conn.close()
         except: pass
+
+
+def show_hint_message(text: str, duration_ms: int = 3000):
+    """在界面底部显示一段文字，持续指定毫秒数"""
+    global hint_message, hint_message_expire
+    hint_message = text
+    hint_message_expire = pygame.time.get_ticks() + duration_ms
 
 # ============================================================================
 # 主程序
@@ -518,7 +529,9 @@ while running:
 
         elif tpe == "NULL":
             # 非法或失败。清空输入，回到可输入态
-            # TODO 前端显示
+            body = msg[4:].strip()
+            if body:
+                show_hint_message(body)
             room_waiting = False
             current_room_num = None
             room_input_text = ""
@@ -557,6 +570,10 @@ while running:
             room_waiting = False
             current_room_num = None
             game_state = TITLE_SCREEN
+
+    # 更新提示信息是否过期
+    if hint_message and pygame.time.get_ticks() >= hint_message_expire:
+        hint_message = ""
 
     # 更新按钮悬停状态
     # 前段代码如果没有事件触发的话，就不会check_hover，导致前端无渲染效果
@@ -641,6 +658,10 @@ while running:
             room_border_color_idle,
             room_border_color_active,
         )
+
+    # 统一在最上层绘制服务器的临时提示
+    if hint_message:
+        draw_hint_message(screen, hint_message)
 
     pygame.display.flip()
     clock.tick(10)

@@ -47,13 +47,13 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
                         try:
                             guess_room = int(body)
                         except ValueError:
-                            await send_line(conn, "NULL你不在任何房间中")
+                            await send_line(conn, "NULLYou don't belong to any room...")
                             continue
                         # 如果这个房间正在重开，而且这个 addr 在重开名单里，就允许把 REST 当成 JOIN 来处理
                         if guess_room in restarting_rooms and addr in restarting_rooms[guess_room]:
                             line = 'JOIN' + line[4:]
                         else:
-                            await send_line(conn, "NULL你不在任何房间中")
+                            await send_line(conn, "NULLYou don't belong to any room...")
                             continue
                     elif room not in rooms:  # 说明对手重开后又退出了
                         line = 'JOIN' + line[4:]  # str不可变
@@ -86,7 +86,7 @@ async def handle_client(conn: socket.socket, addr: tuple) -> None:
 async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     print(f"From {addr}: {line}")
     if len(line) < 4:
-        await send_line(conn, "NULL消息格式错误")
+        await send_line(conn, "NULLWrong message format")
         return
     typ = line[:4]
     body = line[4:].strip()
@@ -95,7 +95,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         try:
             room = int(body)
         except ValueError:
-            await send_line(conn, "NULL房间号非法")
+            await send_line(conn, "NULLInvalid room number")
             return
         lst = rooms.setdefault(room, [])  # dict方法，返回的是value
         # 去重：同一 addr 重复 JOIN 先移除 好处在于维护了FIFO
@@ -107,11 +107,11 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
         if room in protected_rooms:
             allowed_addrs = restarting_rooms.get(room, set())
             if addr not in allowed_addrs:
-                await send_line(conn, "NULL房间已满")
+                await send_line(conn, "NULLRoom already full")
                 return
         # 2）容量限制：非保护状态下，最多两人
         elif len(lst) >= 2:
-            await send_line(conn, "NULL房间已满")
+            await send_line(conn, "NULLRoom already full")
             return
         lst.append((conn, addr))
         addr2room[addr] = room  # 若已有则覆盖
@@ -120,14 +120,14 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
             protected_rooms.discard(room)
             restarting_rooms.pop(room, None)  # None: 不存在也不报错
             for c, _a in lst:
-                await send_line(c, "STAR另一位玩家已连接，游戏开始！")  # 客户端分配黑棋
+                await send_line(c, "STAR")  # 客户端分配黑棋
         elif len(lst) == 1:
-            await send_line(conn, "WAIT等待另一位玩家加入房间...")
+            await send_line(conn, "WAIT")
 
     elif typ == "MOVE":  # 落子
         room = addr2room.get(addr)
         if room is None or room not in rooms:
-            await send_line(conn, "NULL你不在任何房间中")
+            await send_line(conn, "NULLYou don't belong to any room...")
             return
         for c, a in rooms[room]:  # 转发走子信息给对手
             if a != addr:
@@ -142,7 +142,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     elif typ == "UNDO":  # 悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
-            await send_line(conn, "NULL你不在任何房间中")
+            await send_line(conn, "NULLYou don't belong to any room...")
             return
         for c, a in rooms[room]:  # 转发悔棋请求给对手
             if a != addr:
@@ -151,7 +151,7 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     elif typ == "AGRE":  # 对手同意悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
-            await send_line(conn, "NULL你不在任何房间中")
+            await send_line(conn, "NULLYou don't belong to any room...")
             return
         for c, a in rooms[room]:
             if a != addr:
@@ -160,14 +160,14 @@ async def dispatch(conn: socket.socket, addr: tuple, line: str) -> None:
     elif typ == "DAGR":  # 对手拒绝悔棋
         room = addr2room.get(addr)
         if room is None or room not in rooms:
-            await send_line(conn, "NULL你不在任何房间中")
+            await send_line(conn, "NULLYou don't belong to any room...")
             return
         for c, a in rooms[room]:
             if a != addr:
                 await send_line(c, "DAGR" + body)
 
     else:
-        await send_line(conn, "NULL未知指令")
+        await send_line(conn, "NULLUnknown command")
 
     print('after dispatch')
     print('rooms:')
